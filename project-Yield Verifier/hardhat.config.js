@@ -12,6 +12,7 @@ module.exports = {
       {
         version: "0.8.19",
         settings: {
+          viaIR: true,
           optimizer: {
             enabled: true,
             runs: 200
@@ -34,10 +35,12 @@ module.exports = {
       chainId: 1337
     },
     testnet: {
-      url: process.env.TESTNET_RPC_URL || "https://data-seed-prebsc-1-s1.binance.org:8545",
-      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+      url: process.env.TESTNET_RPC_URL,
+      accounts: [process.env.PRIVATE_KEY],
       chainId: 97,
-      gasPrice: 20000000000
+      gasPrice: 20000000000,
+      timeout: 60000,
+      confirmations: 2
     }
   },
   paths: {

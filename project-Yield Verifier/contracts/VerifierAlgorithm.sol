@@ -51,7 +51,7 @@ contract YieldVerifier is AccessControl, Pausable {
     constructor(address _dataFeed) {
         _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _setupRole(VERIFIER_ROLE, msg.sender);
-        dataFeed = IDataFeed(_dataFeed);
+        dataFeed = TheGraphDataFeed(_dataFeed);
     }
 
     function updateMetrics(address strategy) external onlyRole(VERIFIER_ROLE) {
@@ -235,17 +235,9 @@ contract YieldVerifier is AccessControl, Pausable {
         return (score * utilizationRatio) / 100;
     }
 
-    function sqrt(uint256 x) private pure returns (uint256) {
-        if (x == 0) return 0;
-        uint256 z = (x + 1) / 2;
-        uint256 y = x;
-        while (z < y) {
-            y = z;
-            z = (x / z + z) / 2;
-        }
-        return y;
-    }
-        function updateBenchmarkYield(
+
+
+    function updateBenchmarkYield(
         address strategy,
         uint256 totalYield,
         uint256 slope,
@@ -259,51 +251,21 @@ contract YieldVerifier is AccessControl, Pausable {
         uint256 nextPeriod = block.timestamp + UPDATE_INTERVAL;
         uint256 predictedYield = (slope * nextPeriod) + intercept;
 
-        // Combine historical benchmark with prediction
+        // Get current benchmark yield
         uint256 currentBenchmark = strategyMetrics[strategy].benchmarkYield;
         if (currentBenchmark == 0) {
             return predictedYield;
         }
 
-        // Weight recent performance more heavily (70-30 split)
-        return ((predictedYield * 70) + (currentBenchmark * 30)) / 100;
-    }
-
-    function calculatePerformanceScore(
-        uint256 totalYield,
-        uint256 volatility,
-        uint256[] memory events
-    ) private pure returns (uint256) {
-        // Base score from yield (60% weight)
-        uint256 yieldScore = totalYield.mul(60);
-
-        // Volatility penalty (25% weight)
-        uint256 volatilityScore = volatility == 0 ? 25 : 25.mul(1e18).div(volatility.add(1e18));
-
-        // Efficiency score based on events (15% weight)
-        uint256 efficiencyScore = calculateEfficiencyScore(events);
-
-        return yieldScore.add(volatilityScore).add(efficiencyScore);
-    }
-
-    function calculateEfficiencyScore(uint256[] memory events) private pure returns (uint256) {
-        if (events.length == 0) return 15; // Maximum efficiency if no rebalancing needed
+        // Combine regression prediction with exponential moving average
+        uint256 movingAvg = (totalYield + (currentBenchmark * 9)) / 10;
         
-        // Penalize score based on number of rebalancing events
-        uint256 penalty = events.length > 30 ? 15 : events.length.mul(15).div(30);
-        return 15.sub(penalty);
+        // Final yield is weighted average of prediction and moving average (70-30 split)
+        return ((predictedYield * 70) + (movingAvg * 30)) / 100;
     }
 
-    function updateBenchmarkYield(
-        address strategy,
-        uint256 newYield,
-        uint256 oldBenchmark
-    ) private pure returns (uint256) {
-        if (oldBenchmark == 0) return newYield;
-        
-        // Use exponential moving average with 0.1 smoothing factor
-        return (newYield.mul(1).add(oldBenchmark.mul(9))).div(10);
-    }
+    // Helper function to calculate square root
+
 
     // Helper function to calculate square root
     function sqrt(uint256 x) private pure returns (uint256) {
@@ -319,7 +281,7 @@ contract YieldVerifier is AccessControl, Pausable {
 
     // Admin functions
     function setDataFeed(address _dataFeed) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        dataFeed = IDataFeed(_dataFeed);
+        dataFeed = TheGraphDataFeed(_dataFeed);
     }
 
     function pause() external onlyRole(DEFAULT_ADMIN_ROLE) {
