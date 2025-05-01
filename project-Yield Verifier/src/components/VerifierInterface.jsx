@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Card, CardContent, Grid, Typography, TextField, Button, Alert, Snackbar } from '@mui/material';
 import { ethers } from 'ethers';
+import { getContract } from '../contracts/config';
 
 const VerifierInterface = ({ provider, setLoading }) => {
   const [protocolAddress, setProtocolAddress] = useState('');
@@ -16,35 +17,55 @@ const VerifierInterface = ({ provider, setLoading }) => {
       return;
     }
 
+    if (!ethers.utils.isAddress(protocolAddress)) {
+      setNotification({
+        open: true,
+        message: 'Invalid protocol address format',
+        severity: 'error'
+      });
+      return;
+    }
+
     try {
       setLoading(true);
       const signer = provider.getSigner();
       
-      // Create contract instance
-      const verifierABI = [
-        "function updateMetrics(address strategy) external",
-        "function strategyMetrics(address) external view returns (uint256 performanceScore, uint256 benchmarkYield, uint256 lastUpdateTime, uint256 totalYield, uint256 volatility, uint256 utilizationRatio, uint256 regressionSlope, uint256 regressionIntercept)"
-      ];
-      const verifierAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3"; // Local Hardhat deployment address
-      const verifierContract = new ethers.Contract(verifierAddress, verifierABI, signer);
+      // Get contract instance
+      const verifierContract = getContract('YieldVerifier', signer);
       
       // Call verify function
       const tx = await verifierContract.updateMetrics(protocolAddress);
+      setNotification({
+        open: true,
+        message: 'Verification in progress...',
+        severity: 'info'
+      });
+
       await tx.wait();
       
       // Get updated metrics
       const metrics = await verifierContract.strategyMetrics(protocolAddress);
-      console.log('Updated metrics:', metrics);
+      const { performanceScore, benchmarkYield, totalYield, volatility } = metrics;
 
       setNotification({
         open: true,
-        message: 'Protocol verification completed successfully!',
+        message: `Verification successful! Performance Score: ${ethers.utils.formatUnits(performanceScore, 18)}`,
         severity: 'success'
       });
     } catch (error) {
+      let errorMessage = 'Error verifying protocol';
+      
+      if (error.code === 'INVALID_ARGUMENT') {
+        errorMessage = 'Invalid protocol address';
+      } else if (error.code === 'UNPREDICTABLE_GAS_LIMIT') {
+        errorMessage = 'Contract execution failed - check protocol status';
+      } else if (error.code === 'CALL_EXCEPTION') {
+        errorMessage = 'Contract call failed - verify protocol address';
+      }
+
       setNotification({
         open: true,
-        message: error.message || 'Error verifying protocol',
+        message: errorMessage,
         severity: 'error'
       });
     } finally {

@@ -1,6 +1,11 @@
 require("@nomiclabs/hardhat-waffle");
 require("dotenv").config();
 
+const { generatePrivateKey } = require("@ethersproject/random");
+
+// Generate a new private key if not provided in .env
+const privateKey = process.env.PRIVATE_KEY || generatePrivateKey();
+
 module.exports = {
   solidity: {
     compilers: [

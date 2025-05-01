@@ -2,7 +2,9 @@
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/access/AccessControl.sol";
-import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+import "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
+import "@uniswap/v3-core/contracts/libraries/TickMath.sol";
+import "@uniswap/v3-core/contracts/libraries/FullMath.sol";
 
 contract DataFeed is AccessControl {
     bytes32 public constant ORACLE_ROLE = keccak256("ORACLE_ROLE");
@@ -13,22 +15,32 @@ contract DataFeed is AccessControl {
         uint256[] depositWithdrawalEvents;
     }
 
+    struct Observation {
+        uint32 blockTimestamp;
+        int56 tickCumulative;
+        uint160 secondsPerLiquidityCumulativeX128;
+        bool initialized;
+    }
+
     mapping(uint256 => YieldData) private historicalData;
     uint256[] private timestamps;
 
-    AggregatorV3Interface private yieldOracle;
+    IUniswapV3Pool public immutable pool;
+    uint32 public constant TWAP_PERIOD = 1800; // 30 minutes
 
     event DataUpdated(uint256 indexed timestamp, uint256 yieldRate);
     event EventsRecorded(uint256 indexed timestamp, uint256[] events);
 
-    constructor(address _yieldOracle) {
+    constructor(address _pool) {
         _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _setupRole(ORACLE_ROLE, msg.sender);
-        yieldOracle = AggregatorV3Interface(_yieldOracle);
+        pool = IUniswapV3Pool(_pool);
     }
 
-    function updateYieldData(uint256 timestamp, uint256 yieldRate) external onlyRole(ORACLE_ROLE) {
+    function updateYieldData(uint256 timestamp) external onlyRole(ORACLE_ROLE) {
         require(timestamp <= block.timestamp, "Invalid timestamp");
+
+        uint256 yieldRate = getTWAP();
 
         if (historicalData[timestamp].timestamp == 0) {
             timestamps.push(timestamp);
@@ -84,13 +96,24 @@ contract DataFeed is AccessControl {
         return allEvents;
     }
 
-    function getLatestYieldRate() external view returns (uint256) {
-        (, int256 price, , , ) = yieldOracle.latestRoundData();
-        require(price >= 0, "Invalid yield rate");
-        return uint256(price);
+    function getTWAP() public view returns (uint256) {
+        uint32[] memory secondsAgos = new uint32[](2);
+        secondsAgos[0] = TWAP_PERIOD; // from (before)
+        secondsAgos[1] = 0; // to (now)
+
+        (int56[] memory tickCumulatives, ) = pool.observe(secondsAgos);
+
+        int56 tickCumulativesDelta = tickCumulatives[1] - tickCumulatives[0];
+        int24 timeWeightedAverageTick = int24(tickCumulativesDelta / int56(uint56(TWAP_PERIOD)));
+
+        // Convert tick to price
+        uint160 sqrtPriceX96 = TickMath.getSqrtRatioAtTick(timeWeightedAverageTick);
+        uint256 priceX96 = FullMath.mulDiv(sqrtPriceX96, sqrtPriceX96, 1 << 96);
+        
+        return priceX96;
     }
 
-    function setYieldOracle(address _yieldOracle) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        yieldOracle = AggregatorV3Interface(_yieldOracle);
+    function getLatestYieldRate() external view returns (uint256) {
+        return getTWAP();
     }
 }
